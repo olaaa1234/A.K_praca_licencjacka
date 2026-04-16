@@ -1,0 +1,171 @@
+---
+title: "Kartogramy"
+output: html_notebook
+---
+
+
+
+```{r}
+# ===============================================================
+# PRZYGOTOWANIE DANYCH
+# ===============================================================
+
+library(sf)
+library(tmap)
+library(dplyr)
+library(stringi)
+
+stability_table <- tabela_pelna %>%
+  rename(
+    MeanPos = Srednia_Pozycja,
+    Min_Pos = Min_Poz,
+    Max_Pos = Max_Poz,
+    Range = Rozpietosc
+  )
+
+```
+
+
+```{r}
+# ===============================================================
+# WCZYTANIE SHAPEFILE
+# ===============================================================
+
+pow <- read_sf("powiaty/powiaty.shp")
+
+wojew <- pow %>%
+  filter(substr(JPT_KOD_JE, 1, 2) == "32")  # zachodniopomorskie
+
+```
+
+```{r}
+# ===============================================================
+# DOPASOWANIE NAZW
+# ===============================================================
+
+clean_text <- function(x) {
+  x <- tolower(x)
+  x <- gsub("powiat ", "", x)
+  x <- gsub("m\\. ", "", x)
+  x <- trimws(x)
+  x <- stri_trans_general(x, "Latin-ASCII")
+  return(x)
+}
+
+nazwy_shp <- clean_text(wojew$JPT_NAZWA_)
+nazwy_tab <- clean_text(stability_table$Powiat)
+
+# sprawdzenie
+print(setdiff(nazwy_tab, nazwy_shp))
+
+# dopasowanie kodów
+stability_table$JPT_KOD_JE <- wojew$JPT_KOD_JE[
+  match(nazwy_tab, nazwy_shp)
+]
+```
+
+```{r}
+# ===============================================================
+# ŁĄCZENIE
+# ===============================================================
+
+razem <- left_join(wojew, stability_table, by = "JPT_KOD_JE")
+
+if(sum(is.na(razem$Range)) > 0){
+  stop("BŁĄD: nie dopasowano wszystkich powiatów")
+}
+```
+
+```{r}
+# ===============================================================
+# MAPA STABILNOŚCI
+# ===============================================================
+
+razem$Range <- as.numeric(razem$Range)
+
+razem$Stabilnosc <- factor(
+  razem$Range,
+  levels = sort(unique(razem$Range))
+)
+
+levels(razem$Stabilnosc) <- paste0("rozpiętość = ", levels(razem$Stabilnosc))
+
+paleta <- colorRampPalette(c("#b30047", "#fff7fb"))(length(levels(razem$Stabilnosc)))
+
+mapa <- tm_shape(razem) +
+  tm_polygons(
+    col = "Stabilnosc",
+    palette = paleta,
+    title = "Rozpiętość pozycji",
+    colorNA = "white",
+    textNA = "",
+    lwd = 0.5
+  )  +
+  tm_layout(
+    frame = FALSE,
+    legend.outside = TRUE,
+    legend.title.size = 1.2,
+    legend.text.size = 0.9
+  )
+
+mapa
+
+tmap_save(mapa, "mapa_stabilnosc.png", width = 8, height = 6, dpi = 300)
+```
+
+```{r}
+# ===============================================================
+# MAPA POZIOMU ROZWOJU
+# ===============================================================
+
+razem <- razem %>%
+  arrange(MeanPos) %>%
+  mutate(
+    klasa = rep(1:7, each = 3)
+  )
+
+razem$Rozwoj_kat <- factor(
+  razem$klasa,
+  levels = 1:7,
+  labels = c(
+    "bardzo wysoki",
+    "wysoki",
+    "umiarkowany",
+    "średni",
+    "niski",
+    "bardzo niski",
+    "ekstremalnie niski"
+  )
+)
+
+paleta_niebieska <- c(
+  "bardzo wysoki" = "#041f4a",
+  "wysoki" = "#08306b",
+  "umiarkowany" = "#08519c",
+  "średni" = "#2171b5",
+  "niski" = "#4292c6",
+  "bardzo niski" = "#9ecae1",
+  "ekstremalnie niski" = "#f7fbff"
+)
+
+mapa1 <- tm_shape(razem) +
+  tm_polygons(
+    col = "Rozwoj_kat",
+    palette = paleta_niebieska,
+    title = "Poziom rozwoju",
+    colorNA = "white",
+    textNA = "",
+    lwd = 0.5
+  )  +
+  tm_layout(
+    frame = FALSE,
+    legend.outside = TRUE,
+    legend.title.size = 1.2,
+    legend.text.size = 0.9
+  )
+
+mapa1
+
+tmap_save(mapa1, "mapa_rozwoj.png", width = 8, height = 6, dpi = 300)
+```
+

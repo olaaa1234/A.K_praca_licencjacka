@@ -1,0 +1,130 @@
+---
+title: "Macierz dominacji netto"
+output: html_notebook
+---
+
+
+
+```{r}
+# ===============================================================
+# 1. WCZYTANIE DANYCH
+# ===============================================================
+
+if(!require(readxl)) install.packages("readxl")
+library(readxl)
+
+file_path <- "dane_4.xlsx"
+
+raw_data <- read_excel(file_path, sheet = 1)
+
+object_names <- raw_data[[2]]
+
+data_vars <- raw_data[,3:ncol(raw_data)]
+data_vars <- as.data.frame(lapply(data_vars, as.numeric))
+
+N <- nrow(data_vars)
+N_cols <- ncol(data_vars)
+
+
+destimulant_idx <- c(4, 9, 12)
+stimulant_idx <- setdiff(1:N_cols, destimulant_idx)
+
+
+
+```
+
+```{r}
+# ===============================================================
+# 2. MACIERZ DOMINACJI
+# ===============================================================
+
+build_dominance_matrix <- function(data, stim_idx, destim_idx){
+
+  n <- nrow(data)
+  mat <- matrix(0,n,n)
+
+  for(i in 1:n){
+    for(j in 1:n){
+
+      if(i==j) next
+
+      score <- 0
+
+      
+      for(k in stim_idx){
+        if(!is.na(data[i,k]) && !is.na(data[j,k])){
+          if(data[i,k] > data[j,k]) score <- score + 1
+        }
+      }
+
+     
+      for(k in destim_idx){
+        if(!is.na(data[i,k]) && !is.na(data[j,k])){
+          if(data[i,k] < data[j,k]) score <- score + 1
+        }
+      }
+
+      mat[i,j] <- score
+    }
+  }
+
+  return(mat)
+}
+
+```
+
+```{r}
+# ===============================================================
+# 3. NORMALIZACJA
+# ===============================================================
+
+normalize_dominance_matrix <- function(mat){
+
+  n <- nrow(mat)
+
+  for(i in 1:(n-1)){
+    for(j in (i+1):n){
+
+      if(mat[i,j] > mat[j,i]){
+        mat[i,j] <- mat[i,j] - mat[j,i]
+        mat[j,i] <- 0
+      }else{
+        mat[j,i] <- mat[j,i] - mat[i,j]
+        mat[i,j] <- 0
+      }
+    }
+  }
+
+  diag(mat) <- 0
+  return(mat)
+}
+
+
+```
+
+```{r}
+# ===============================================================
+# 4. OBLICZENIA
+# ===============================================================
+
+cat("Budowa macierzy dominacji...\n")
+
+M_raw <- build_dominance_matrix(data_vars, stimulant_idx, destimulant_idx)
+M <- normalize_dominance_matrix(M_raw)
+
+```
+
+```{r}
+# ===============================================================
+# 5. ZAPIS
+# ===============================================================
+
+saveRDS(M, "dominance_matrix.rds")
+saveRDS(object_names, "object_names.rds")
+
+cat("Macierz dominacji zapisana.\n")
+
+```
+
+
+
