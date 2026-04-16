@@ -1,0 +1,171 @@
+---
+title: "Porównanie Metod Rankingowania"
+output: html_notebook
+---
+
+
+
+```{r}
+# ===============================================================
+# 1. RANKINGI: MLOP, TOPSIS, GDM
+# ===============================================================
+
+
+ranking_MLOP <- numeric(N)
+ranking_MLOP[res$sol] <- 1:N
+
+X <- as.matrix(data_vars)
+
+destimulants_idx <- c(4, 9, 12)
+stimulants_idx <- setdiff(1:ncol(X), destimulants_idx)
+
+X_topsis <- X
+
+for (j in destimulants_idx) {
+  if (max(X[, j]) != min(X[, j])) {
+    X_topsis[, j] <- max(X[, j]) - X[, j]
+  }
+}
+
+
+X_norm <- X_topsis
+
+for (j in 1:ncol(X_topsis)) {
+  X_norm[, j] <- X_topsis[, j] / sqrt(sum(X_topsis[, j]^2))
+}
+
+ideal <- apply(X_norm, 2, max)
+anti_ideal <- apply(X_norm, 2, min)
+
+d_plus <- apply(X_norm, 1, function(x) sqrt(sum((x - ideal)^2)))
+d_minus <- apply(X_norm, 1, function(x) sqrt(sum((x - anti_ideal)^2)))
+
+topsis_score <- d_minus / (d_plus + d_minus)
+
+ranking_topsis <- rank(-topsis_score, ties.method = "average")
+
+
+X_std <- scale(X_topsis)
+
+wzorzec <- apply(X_std, 2, max)
+
+gdm_score <- apply(X_std, 1, function(x) {
+  sqrt(sum((x - wzorzec)^2))
+})
+
+ranking_gdm <- rank(gdm_score, ties.method = "average")
+```
+
+```{r}
+# ===============================================================
+# 2. TABELA RANKINGÓW
+# ===============================================================
+
+df_rank <- data.frame(
+  Powiat = obj_names,
+  MLOP = ranking_MLOP,
+  TOPSIS = ranking_topsis,
+  GDM = ranking_gdm
+)
+```
+
+
+```{r}
+# ===============================================================
+# 3. FORMAT LONG + KOLEJNOŚĆ
+# ===============================================================
+
+library(dplyr)
+library(tidyr)
+
+df_long <- df_rank %>%
+  pivot_longer(
+    cols = c("MLOP", "TOPSIS", "GDM"),
+    names_to = "Metoda",
+    values_to = "Pozycja"
+  )
+
+df_long$Metoda <- factor(df_long$Metoda, levels = c("MLOP", "TOPSIS", "GDM"))
+
+order_MLOP <- df_rank %>%
+  arrange(MLOP) %>%
+  pull(Powiat)
+
+df_long$Powiat <- factor(df_long$Powiat, levels = rev(order_MLOP))
+```
+
+```{r}
+# ===============================================================
+# 4. WYKRES
+# ===============================================================
+
+library(ggplot2)
+
+plot_porownanie <- ggplot(df_long, aes(x = Metoda, y = Pozycja, group = Powiat)) +
+
+  geom_hline(yintercept = 1:N, color = "grey85", linetype = "dashed") +
+
+  geom_line(aes(color = Powiat), size = 0.8, alpha = 0.9) +
+
+  geom_point(aes(color = Powiat), size = 2) +
+
+  scale_y_reverse(breaks = 1:N) +
+
+  labs(
+    x = "Metoda rankingowania",
+    y = "Pozycja w rankingu (1 = najlepszy)"
+  ) +
+
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    panel.grid = element_blank(),
+    axis.text.x = element_text(size = 10),
+    axis.text.y = element_text(size = 9)
+  )
+```
+
+```{r}
+# ===============================================================
+# 5. ETYKIETY
+# ===============================================================
+
+plot_porownanie <- plot_porownanie +
+
+  geom_text(
+    data = df_long %>% filter(Metoda == "MLOP"),
+    aes(label = Powiat, color = Powiat),
+    hjust = 1.1,
+    size = 3
+  ) +
+
+  geom_text(
+    data = df_long %>% filter(Metoda == "GDM"),
+    aes(label = Powiat, color = Powiat),
+    hjust = -0.1,
+    size = 3
+  ) +
+
+  expand_limits(x = c(0.7, 3.3))
+```
+
+```{r}
+# ===============================================================
+# 6. WYŚWIETLENIE + KORELACJE
+# ===============================================================
+
+plot_porownanie
+
+ggsave(
+  filename = "porownanie_metod.png",
+  plot = plot_porownanie,
+  width = 12,
+  height = 8,
+  dpi = 300
+)
+
+cor(ranking_MLOP, ranking_topsis, method = "spearman")
+cor(ranking_MLOP, ranking_gdm, method = "spearman")
+cor(ranking_topsis, ranking_gdm, method = "spearman")
+```
+

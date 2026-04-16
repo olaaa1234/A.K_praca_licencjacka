@@ -1,0 +1,502 @@
+---
+title: "MLOP"
+output: html_notebook
+---
+
+
+```{r}
+# ===============================================================
+# 1. WCZYTANIE DANYCH
+# ===============================================================
+
+library(dplyr)
+
+M <- readRDS("dominance_matrix.rds")
+obj_names <- readRDS("object_names.rds")
+
+N <- nrow(M)
+
+cat("Liczba obiektów:",N,"\n")
+
+
+
+```
+
+
+
+```{r}
+# ===============================================================
+# 2. FUNKCJA CELU LOP
+# ===============================================================
+
+eva_sol <- function(sol){
+
+  value <- 0
+
+  for(i in 1:(N-1)){
+
+    for(j in (i+1):N){
+
+      value <- value + M[ sol[i], sol[j] ]
+
+    }
+
+  }
+
+  return(value)
+
+}
+```
+
+
+```{r}
+# ===============================================================
+# 3. RUCH INSERT
+# ===============================================================
+
+make_move <- function(sol,pos_i,pos_j){
+
+  element <- sol[pos_j]
+
+  sol <- sol[-pos_j]
+
+  if(pos_i == 1){
+
+    sol <- c(element,sol)
+
+  }else{
+
+    sol <- append(sol,element,after=pos_i-1)
+
+  }
+
+  return(sol)
+
+}
+```
+
+```{r}
+
+# ===============================================================
+# 4. DELTA EVALUATION
+# ===============================================================
+
+eva_move <- function(sol,val_sol,pos_i,pos_j){
+
+  diff_val <- 0
+
+  element <- sol[pos_j]
+
+  if(pos_i < pos_j){
+
+    subset_indices <- sol[pos_i:(pos_j-1)]
+
+    term1 <- sum(M[element,subset_indices])
+    term2 <- sum(M[subset_indices,element])
+
+    diff_val <- diff_val + (term1 - term2)
+
+  }else{
+
+    subset_indices <- sol[(pos_j+1):pos_i]
+
+    term1 <- sum(M[element,subset_indices])
+    term2 <- sum(M[subset_indices,element])
+
+    diff_val <- diff_val - (term1 - term2)
+
+  }
+
+  return(val_sol + diff_val)
+
+}
+```
+
+
+```{r}
+# ===============================================================
+# LOCAL SEARCH 
+# ===============================================================
+
+local_search <- function(sol, val_act, epsilon = 0){
+
+  current_sol <- sol
+  current_val <- val_act
+  
+  flag_global_improvement <- TRUE
+  
+  
+  iter_ls <- 0
+  max_iter_ls <- 200
+  
+  while(flag_global_improvement && iter_ls < max_iter_ls){
+    
+    flag_global_improvement <- FALSE
+    
+    best_move_val <- current_val
+    best_i <- -1
+    best_j <- -1
+    
+    for(pos_j in 1:N){
+      
+      for(pos_i in 1:N){
+        
+        if(pos_i == pos_j) next
+        
+        cand_val <- eva_move(current_sol, current_val, pos_i, pos_j)
+        
+        
+        if(cand_val > best_move_val - epsilon * current_val){
+          
+          best_move_val <- cand_val
+          best_i <- pos_i
+          best_j <- pos_j
+          
+          flag_global_improvement <- TRUE
+        }
+      }
+    }
+    
+    if(flag_global_improvement){
+      
+      current_sol <- make_move(current_sol, best_i, best_j)
+      current_val <- best_move_val
+      
+    }
+    
+    iter_ls <- iter_ls + 1
+  }
+  
+  return(list(sol = current_sol, val = current_val))
+}
+```
+
+```{r}
+# ===============================================================
+# 6. SHAKE 
+# ===============================================================
+
+shake <- function(sol, k) {
+  new_sol <- sol
+  
+  if(k == 1) {
+    
+    pos_i <- sample(2:(N-1), 1)
+    flip <- sample(0:1, 1)
+    
+    if(flip == 0) {
+      pos_j <- pos_i + 1
+    } else {
+      pos_j <- pos_i - 1
+    }
+    new_sol <- make_move(new_sol, pos_i, pos_j)
+    
+  } else {
+    
+    for(i in 1:(k-1)) {
+      pos_i <- sample(1:N, 1)
+      pos_j <- sample(1:N, 1)
+      if(pos_i != pos_j) {
+        new_sol <- make_move(new_sol, pos_i, pos_j)
+      }
+    }
+  }
+  
+  return(new_sol)
+}
+```
+
+```{r}
+# ===============================================================
+# 7. ODLEGŁOŚĆ KENDALLA
+# ===============================================================
+
+kendall_tau <- function(arr1,arr2){
+
+  distancia <- 0
+
+  n_local <- length(arr1)
+
+  index_map <- numeric(n_local)
+
+  for(i in 1:n_local){
+
+    index_map[arr2[i]] <- i
+
+  }
+
+  for(i in 1:(n_local-1)){
+
+    for(j in (i+1):n_local){
+
+      if(index_map[arr1[i]] > index_map[arr1[j]]){
+
+        distancia <- distancia + 1
+
+      }
+
+    }
+
+  }
+
+  return(distancia)
+
+}
+```
+
+```{r}
+# ===============================================================
+# 8. BVNS 
+# ===============================================================
+
+BVNS <- function(){
+
+  sol <- sample(1:N)
+
+  val <- eva_sol(sol)
+
+  res <- local_search(sol,val)
+
+  sol <- res$sol
+  best_val <- res$val
+
+  kmax <- floor(N/2)
+
+  iter <- 0
+  MaxIter <- 2000
+
+  while(iter < MaxIter){
+
+    k <- 1
+
+    while(k <= kmax){
+
+      sol_shaken <- shake(sol,k)
+
+      val_shaken <- eva_sol(sol_shaken)
+
+      ls_res <- local_search(sol_shaken,val_shaken)
+
+      if(ls_res$val > best_val){
+
+        sol <- ls_res$sol
+        best_val <- ls_res$val
+
+        k <- 1
+        iter <- 0
+
+      }else{
+
+        k <- k + 1
+        iter <- iter + 1
+
+      }
+
+    }
+
+  }
+
+  return(list(sol=sol,val=best_val))
+
+}
+```
+
+```{r}
+# ===============================================================
+# MLOP (VNS) Z PARAMETRAMI
+# ===============================================================
+
+MLOP <- function(best_sol,
+                 best_val,
+                 m = 15,
+                 time_limit = 10,
+                 kmax = floor(N/2),
+                 threshold = 0){
+
+  S <- lapply(1:m,function(x) best_sol)
+
+  kendall_matrix <- matrix(0,nrow=m,ncol=m+1)
+
+  best_MDP <- 0
+
+  start_time <- Sys.time()
+
+  iter <- 0
+
+  while(as.numeric(difftime(Sys.time(),start_time,units="secs")) < time_limit){
+
+    rnd <- sample(1:m,1)
+
+    q <- S[[rnd]]
+
+    k <- 1
+
+    while(k < kmax){
+
+      sol_shaken <- shake(q,k)
+
+      val_shaken <- eva_sol(sol_shaken)
+
+      ls_res <- local_search(sol_shaken,val_shaken,epsilon=threshold)
+
+      if(abs(ls_res$val - best_val) <= threshold * best_val){
+
+        exists <- any(sapply(S,function(x) all(x == ls_res$sol)))
+
+        if(!exists){
+
+          best_gain <- 0
+          replace_idx <- -1
+
+          new_dists <- sapply(S,function(x) kendall_tau(ls_res$sol,x))
+
+          for(i in 1:m){
+
+            gain <- sum(new_dists[-i]) - kendall_matrix[i,m+1]
+
+            if(gain > best_gain){
+
+              best_gain <- gain
+              replace_idx <- i
+            }
+          }
+
+          if(replace_idx != -1){
+
+            S[[replace_idx]] <- ls_res$sol
+
+            best_MDP <- best_MDP + best_gain
+
+            for(j in 1:m){
+
+              kendall_matrix[replace_idx,j] <- new_dists[j]
+
+              kendall_matrix[j,replace_idx] <- new_dists[j]
+            }
+
+            for(i in 1:m){
+
+              kendall_matrix[i,m+1] <- sum(kendall_matrix[i,1:m])
+            }
+
+            k <- 1
+
+            next
+          }
+        }
+      }
+
+      k <- k + 1
+      iter <- iter + 1
+    }
+
+    if(as.numeric(difftime(Sys.time(),start_time,units="secs")) >= time_limit) break
+  }
+
+  return(S)
+}
+```
+
+```{r}
+# ===============================================================
+# 10. KONFIGURACJA I URUCHOMIENIE 
+# ===============================================================
+library(dplyr)
+
+
+m_rozmiar <- 200
+limit_czasowy <- 150
+tolerancja <- 0.001  
+n_size <- N          
+kmax_tuned <- floor(n_size / 2)
+
+cat("Szukanie optimum LOP...\n")
+res <- BVNS() 
+
+cat("Optimum:", res$val, "\n")
+cat("Uruchamiam MLOP (m =", m_rozmiar, ", kmax =", kmax_tuned, ")... \n")
+
+
+S_dostrojone <- MLOP(
+  best_sol = res$sol,
+  best_val = res$val,
+  m = m_rozmiar,
+  time_limit = limit_czasowy,
+  kmax = kmax_tuned,
+  threshold = tolerancja
+)
+
+cat("MLOP zakończony\n")
+
+```
+
+```{r}
+# ===============================================================
+# 11. RANKING KOŃCOWY
+# ===============================================================
+
+ranking <- data.frame(
+
+  Pozycja = 1:N,
+  Powiat = obj_names[res$sol]
+
+)
+
+print(ranking)
+```
+
+```{r}
+# ===============================================================
+# 11. ANALIZA UZYSKANYCH WYNIKÓW
+# ===============================================================
+
+ranking_strings <- sapply(S_dostrojone, paste, collapse = ",")
+uniq_idx <- !duplicated(ranking_strings)
+S_unique <- S_dostrojone[uniq_idx]
+
+liczba_unikalnych <- length(S_unique)
+
+
+pos_matrix <- matrix(NA, nrow = n_size, ncol = liczba_unikalnych)
+
+for (j in seq_along(S_unique)) {
+  ranking <- S_unique[[j]]
+  pozycje <- numeric(n_size)
+  pozycje[ranking] <- 1:n_size
+  pos_matrix[, j] <- pozycje
+}
+
+
+poz_opt <- numeric(n_size)
+poz_opt[res$sol] <- 1:n_size
+
+
+tabela_pelna <- data.frame(
+  Powiat = obj_names,
+  Poz_Optymalna = poz_opt,
+  Min_Poz = apply(pos_matrix, 1, min),
+  Srednia_Pozycja = round(rowMeans(pos_matrix), 2),
+  Max_Poz = apply(pos_matrix, 1, max)
+) %>%
+  dplyr::mutate(
+    Rozpietosc = Max_Poz - Min_Poz,
+    Przedzial = paste0("[", Min_Poz, ", ", Max_Poz, "]")
+  ) %>%
+  dplyr::arrange(Poz_Optymalna) 
+
+
+cat("\n--- RAPORT STABILNOŚCI RANKINGU ---\n")
+print(tabela_pelna, row.names = FALSE)
+
+cat("\nLiczba wszystkich próbek MLOP:", length(S_dostrojone))
+cat("\nLiczba unikalnych rozwiązań:", liczba_unikalnych)
+cat("\nŚrednia rozpiętość (niepewność):", round(mean(tabela_pelna$Rozpietosc), 2))
+```
+
+```{r}
+# zapis wyników 
+ save(res, obj_names, N, M, file = "sesja_lop.RData")
+```
+
+
+
